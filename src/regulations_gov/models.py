@@ -100,9 +100,14 @@ class GetDocumentInput(BaseModel):
         min_length=1,
         max_length=100,
     )
-    include_attachments: bool = Field(
+    download_content: bool = Field(
         default=False,
-        description="Include attachment metadata in the response",
+        description=(
+            "Download and extract text from all PDF files attached to this document. "
+            "Uses the API's include=attachments parameter to discover file URLs, "
+            "then fetches each PDF and extracts its text content. "
+            "Use this to read the actual document or supporting file text."
+        ),
     )
     response_format: ResponseFormat = Field(
         default=ResponseFormat.MARKDOWN,
@@ -179,7 +184,11 @@ class GetCommentInput(BaseModel):
     )
     include_attachments: bool = Field(
         default=False,
-        description="Include attachment metadata in the response",
+        description=(
+            "Include attachment metadata in the response using the API's include=attachments parameter. "
+            "Returns titles, file formats, sizes, and download URLs for each attachment. "
+            "Many comments are submitted as PDFs — use this to discover their download URLs."
+        ),
     )
     response_format: ResponseFormat = Field(
         default=ResponseFormat.MARKDOWN,
@@ -257,3 +266,5 @@ class GetDocketInput(BaseModel):
         default=ResponseFormat.MARKDOWN,
         description="Output format: 'markdown' for human-readable, 'json' for machine-readable",
     )
+
+

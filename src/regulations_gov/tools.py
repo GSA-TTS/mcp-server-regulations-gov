@@ -1,5 +1,6 @@
+import asyncio
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List
 
 from .models import (
     GetCommentInput,
@@ -10,7 +11,9 @@ from .models import (
     SearchDocumentsInput,
     SearchDocketsInput,
 )
+from .pdf import fetch_pdf_text
 from .utils import (
+    _attrs,
     build_pagination_meta,
     build_search_params,
     format_comment_markdown,
@@ -25,6 +28,30 @@ from .utils import (
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
+
+
+def _collect_file_urls(api_response: Dict[str, Any]) -> List[str]:
+    """Collect all PDF fileUrls from data.attributes.fileFormats and included[].attributes.fileFormats."""
+    urls: List[str] = []
+
+    def _extract(fmt_list: Any) -> None:
+        if not isinstance(fmt_list, list):
+            return
+        for fmt in fmt_list:
+            if isinstance(fmt, dict) and fmt.get("format", "").lower() == "pdf":
+                url = fmt.get("fileUrl", "")
+                if url:
+                    urls.append(url)
+
+    # Main document files
+    data = api_response.get("data", {})
+    _extract(_attrs(data).get("fileFormats", []))
+
+    # Included attachment files
+    for item in api_response.get("included", []):
+        _extract(_attrs(item).get("fileFormats", []))
+
+    return urls
 
 _READ_ONLY_ANNOTATIONS = {
     "readOnlyHint": True,
@@ -116,33 +143,51 @@ def register_tools(mcp: "FastMCP") -> None:
         },
     )
     async def regulations_get_document(params: GetDocumentInput) -> str:
-        """Get full details for a specific document on regulations.gov.
+        """Get full details for a specific document on regulations.gov, optionally downloading its content.
 
         Retrieves comprehensive metadata for a single document including title, agency,
-        docket, comment period dates, Federal Register number, and optionally attachment
-        metadata. Use this after regulations_search_documents to get complete document details.
+        docket, comment period dates, and Federal Register number.
+
+        When download_content=True, calls the API with include=attachments to discover all
+        file URLs (from data.attributes.fileFormats and included[].attributes.fileFormats),
+        downloads each PDF, and extracts the full text.
 
         Args:
             params (GetDocumentInput): Parameters including:
                 - document_id (str): Document object ID or document ID
-                  (e.g., '09000064846eae46' or 'EPA-HQ-OAR-2021-0257-0001')
-                - include_attachments (bool): Include attachment metadata, default False
+                  (e.g., 'FDA-2009-N-0501-0012' or 'EPA-HQ-OAR-2021-0257-0001')
+                - download_content (bool): Download and extract text from all PDF files, default False
                 - response_format (ResponseFormat): 'markdown' or 'json', default 'markdown'
 
         Returns:
-            str: Full document metadata. If include_attachments=True, also returns
-                 attachment list with file formats and sizes.
+            str: Document metadata. If download_content=True, also includes extracted text
+                 from each PDF file under labeled sections.
 
         Examples:
-            - Get document details: document_id='EPA-HQ-OAR-2021-0257-0001'
-            - Get document with attachments: document_id='...', include_attachments=True
+            - Get document metadata: document_id='FDA-2009-N-0501-0012'
+            - Read document text: document_id='FDA-2009-N-0501-0012', download_content=True
         """
         try:
-            api_params = {}
-            if params.include_attachments:
-                api_params["include"] = "attachments"
-
+            api_params = {"include": "attachments"} if params.download_content else {}
             data = await make_api_request(f"documents/{params.document_id}", api_params or None)
+
+            if params.download_content:
+                pdf_urls = _collect_file_urls(data)
+                if pdf_urls:
+                    texts = await asyncio.gather(*[fetch_pdf_text(url) for url in pdf_urls])
+                    if params.response_format == ResponseFormat.JSON:
+                        result = dict(data)
+                        result["extracted_content"] = [
+                            {"url": url, "text": text}
+                            for url, text in zip(pdf_urls, texts)
+                        ]
+                        return to_json_response(result)
+                    meta = format_detail_response_markdown(data.get("data", data), "Document", format_document_markdown)
+                    sections = [meta, ""]
+                    for url, text in zip(pdf_urls, texts):
+                        name = url.rsplit("/", 1)[-1]
+                        sections += [f"## Content: {name}", "", text, ""]
+                    return "\n".join(sections)
 
             if params.response_format == ResponseFormat.JSON:
                 return to_json_response(data)
@@ -228,28 +273,30 @@ def register_tools(mcp: "FastMCP") -> None:
     async def regulations_get_comment(params: GetCommentInput) -> str:
         """Get full details for a specific public comment on regulations.gov.
 
-        Retrieves the full text and metadata for a single public comment. Note that
-        personally identifiable information (address, email, phone) is never returned
+        Retrieves the full text and metadata for a single public comment. Many comments
+        are submitted as PDF attachments rather than inline text — use include_attachments=True
+        to get attachment titles, formats, sizes, and download URLs via the API.
+
+        Note: personally identifiable information (address, email, phone) is never returned
         by the API per regulations.gov policy.
 
         Args:
             params (GetCommentInput): Parameters including:
                 - comment_id (str): Comment document ID (e.g., 'EPA-HQ-OAR-2021-0257-0542')
-                - include_attachments (bool): Include attachment metadata, default False
+                - include_attachments (bool): Include attachment metadata (titles, formats, download URLs)
+                  via the API's include=attachments parameter, default False
                 - response_format (ResponseFormat): 'markdown' or 'json', default 'markdown'
 
         Returns:
-            str: Full comment text and metadata including organization, tracking number,
-                 docket, and receive/post dates.
+            str: Full comment text and metadata. If include_attachments=True, also lists
+                 each attachment with its title, format, size, and direct download URL.
 
         Examples:
-            - Get comment text: comment_id='EPA-HQ-OAR-2021-0257-0542'
-            - Get comment with attachments: comment_id='...', include_attachments=True
+            - Get inline comment text: comment_id='EPA-HQ-OAR-2021-0257-0542'
+            - Get comment with attachment URLs: comment_id='...', include_attachments=True
         """
         try:
-            api_params = {}
-            if params.include_attachments:
-                api_params["include"] = "attachments"
+            api_params = {"include": "attachments"} if params.include_attachments else {}
 
             data = await make_api_request(f"comments/{params.comment_id}", api_params or None)
 

@@ -233,7 +233,12 @@ def format_detail_response_markdown(
             lines.append(f"- **{title}**")
             for fmt in file_formats:
                 if isinstance(fmt, dict):
-                    lines.append(f"  - {fmt.get('format', '')} ({fmt.get('size', '')} bytes)")
+                    size = fmt.get("size", "")
+                    fmt_type = fmt.get("format", "")
+                    file_url = fmt.get("fileUrl", "")
+                    size_str = f" ({size} bytes)" if size else ""
+                    url_str = f" — {file_url}" if file_url else ""
+                    lines.append(f"  - {fmt_type}{size_str}{url_str}")
     return "\n".join(lines)
 
 
