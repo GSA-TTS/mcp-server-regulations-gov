@@ -1,6 +1,6 @@
 [project]
 name = "mcp-server-regulations-gov"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP server for the regulations.gov API — search federal documents, comments, and dockets"
 readme = "README.md"
 requires-python = ">=3.13"
