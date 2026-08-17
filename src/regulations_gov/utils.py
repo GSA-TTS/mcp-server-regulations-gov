@@ -6,6 +6,15 @@ import httpx
 
 API_BASE_URL = "https://api.regulations.gov/v4"
 
+# Shared tool annotations: every tool in this server is a read-only, idempotent
+# query against the public regulations.gov API (an external/open-world service).
+READ_ONLY_ANNOTATIONS = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    "openWorldHint": True,
+}
+
 
 def get_api_key() -> str:
     key = os.environ.get("REGULATIONS_GOV_API_KEY")
@@ -91,6 +100,33 @@ def _field(data: Dict[str, Any], key: str, default: str = "N/A") -> str:
 
 def _attrs(item: Dict[str, Any]) -> Dict[str, Any]:
     return item.get("attributes", {})
+
+
+def collect_pdf_file_urls(api_response: Dict[str, Any]) -> List[str]:
+    """Collect all PDF fileUrls from a document API response.
+
+    Reads both the primary document files (data.attributes.fileFormats) and any
+    included attachment files (included[].attributes.fileFormats), returning the
+    URL of every format whose type is PDF.
+    """
+    urls: List[str] = []
+
+    def _extract(fmt_list: Any) -> None:
+        if not isinstance(fmt_list, list):
+            return
+        for fmt in fmt_list:
+            if isinstance(fmt, dict) and fmt.get("format", "").lower() == "pdf":
+                url = fmt.get("fileUrl", "")
+                if url:
+                    urls.append(url)
+
+    data = api_response.get("data", {})
+    _extract(_attrs(data).get("fileFormats", []))
+
+    for item in api_response.get("included", []):
+        _extract(_attrs(item).get("fileFormats", []))
+
+    return urls
 
 
 def format_document_markdown(doc: Dict[str, Any]) -> str:
