@@ -1,7 +1,6 @@
 ---
 name: mcp-builder
 description: Guide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. Use when building MCP servers to integrate external APIs or services, whether in Python (FastMCP) or Node/TypeScript (MCP SDK).
-license: Complete terms in LICENSE.txt
 ---
 
 # MCP Server Development Guide
@@ -55,15 +54,15 @@ Key pages to review:
 
 **Load framework documentation:**
 
-- **MCP Best Practices**: [📋 View Best Practices](./reference/mcp_best_practices.md) - Core guidelines
+- **MCP Best Practices**: [📋 View Best Practices](./references/mcp_best_practices.md) - Core guidelines
 
 **For TypeScript (recommended):**
 - **TypeScript SDK**: Use WebFetch to load `https://raw.githubusercontent.com/modelcontextprotocol/typescript-sdk/main/README.md`
-- [⚡ TypeScript Guide](./reference/node_mcp_server.md) - TypeScript patterns and examples
+- [⚡ TypeScript Guide](./references/node_mcp_server.md) - TypeScript patterns and examples
 
 **For Python:**
 - **Python SDK**: Use WebFetch to load `https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/main/README.md`
-- [🐍 Python Guide](./reference/python_mcp_server.md) - Python patterns and examples
+- [🐍 Python Guide](./references/python_mcp_server.md) - Python patterns and examples
 
 #### 1.4 Plan Your Implementation
 
@@ -93,19 +92,63 @@ my-mcp-server/
     └── <servername>/       # Package directory named after the server
         ├── __init__.py
         ├── app.py          # Server initialization & deployment config only
-        ├── tools.py        # Single register_tools(mcp) function listing all tools
         ├── models.py       # Pydantic models for API parameters
-        └── utils.py        # Utility/helper functions (API client, formatting, etc.)
+        ├── utils.py        # Utility/helper functions (API client, formatting, etc.)
+        └── tools/          # Tools submodule — one file per tool
+            ├── __init__.py # Aggregates tools via register_tools(mcp)
+            ├── <tool_a>.py # One tool per file, exposing a register(mcp) function
+            ├── <tool_b>.py
+            └── ...
 ```
 
 **File responsibilities:**
-- **`app.py`**: Create the FastMCP instance, import and call `register_tools(mcp)`, and configure transports (stdio for local, HTTP/SSE for remote). Keep this file minimal — it should only handle deployment concerns.
-- **`tools.py`**: Export a single `register_tools(mcp)` function that defines all `@mcp.tool` decorated functions. Each tool function should be defined inside `register_tools()` so tools are registered when called.
+- **`app.py`**: Create the FastMCP instance, import and call `register_tools(mcp)` from the `tools` submodule, and configure transports (stdio for local, HTTP/SSE for remote). Keep this file minimal — it should only handle deployment concerns.
+- **`tools/`**: A submodule (package) where **each tool lives in its own `.py` file**. Prefer this layout over a single monolithic `tools.py`, as it keeps tools isolated, easier to navigate, and simpler to test/modify independently.
+  - **`tools/<tool_name>.py`**: Defines a single tool. Each file exposes a `register(mcp)` function that attaches its `@mcp.tool` decorated function to the server. Keep one tool per file (name the file after the tool).
+  - **`tools/__init__.py`**: Imports each tool module and exposes a single `register_tools(mcp)` function that calls each module's `register(mcp)`. `app.py` imports `register_tools` from here.
 - **`models.py`**: Pydantic models, enums, and typed parameter classes for API request/response validation.
 - **`utils.py`**: Shared helpers like API key loading, HTTP client setup, response formatting, and data summarization.
 
+**Per-tool file pattern (Python):**
+
+```python
+# src/<servername>/tools/<tool_name>.py
+from __future__ import annotations
+from typing import Any
+from fastmcp import FastMCP
+
+
+def register(mcp: FastMCP) -> None:
+    """Register the <tool_name> tool with the MCP server."""
+
+    @mcp.tool(
+        name="<prefix>_<tool_name>",
+        annotations={
+            "title": "...",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    )
+    def <tool_name>() -> dict[str, Any]:
+        """Concise description, usage guidance, return schema, and error responses."""
+        ...
+```
+
+```python
+# src/<servername>/tools/__init__.py
+from . import tool_a, tool_b
+
+
+def register_tools(mcp):
+    """Register all tools with the MCP server."""
+    tool_a.register(mcp)
+    tool_b.register(mcp)
+```
+
 **For TypeScript**, see:
-- [⚡ TypeScript Guide](./reference/node_mcp_server.md) - Project structure, package.json, tsconfig.json
+- [⚡ TypeScript Guide](./references/node_mcp_server.md) - Project structure, package.json, tsconfig.json
 
 #### 2.2 Implement Core Infrastructure
 
@@ -176,7 +219,7 @@ See language-specific guides for detailed testing approaches and quality checkli
 
 After implementing your MCP server, create comprehensive evaluations to test its effectiveness.
 
-**Load [✅ Evaluation Guide](./reference/evaluation.md) for complete evaluation guidelines.**
+**Load [✅ Evaluation Guide](./references/evaluation.md) for complete evaluation guidelines.**
 
 #### 4.1 Understand Evaluation Purpose
 
@@ -215,6 +258,19 @@ Create an XML file with this structure:
 </evaluation>
 ```
 
+Store this question set inside the evaluation module next to the dataset it
+produces (e.g. `eval/phoenix/datasets/<name>/evaluation.xml`) rather than as a
+free-floating file at the repo root, so the source questions travel with the CSV
+they generate.
+
+#### 4.5 Run the Evaluations
+
+To actually execute the questions against your server, build a Phoenix-based
+evaluation harness. **Load the [mcp-eval skill](../mcp-eval/SKILL.md)** for the full
+implementation: the `eval/phoenix/` module layout, the LangChain agent that launches
+your server over stdio, LLM-as-judge evaluators, dataset creation, and the experiment
+runner. The XML question set from 4.4 is converted into the harness's CSV dataset.
+
 ---
 
 # Reference Files
@@ -225,7 +281,7 @@ Load these resources as needed during development:
 
 ### Core MCP Documentation (Load First)
 - **MCP Protocol**: Start with sitemap at `https://modelcontextprotocol.io/sitemap.xml`, then fetch specific pages with `.md` suffix
-- [📋 MCP Best Practices](./reference/mcp_best_practices.md) - Universal MCP guidelines including:
+- [📋 MCP Best Practices](./references/mcp_best_practices.md) - Universal MCP guidelines including:
   - Server and tool naming conventions
   - Response format guidelines (JSON vs Markdown)
   - Pagination best practices
@@ -237,14 +293,14 @@ Load these resources as needed during development:
 - **TypeScript SDK**: Fetch from `https://raw.githubusercontent.com/modelcontextprotocol/typescript-sdk/main/README.md`
 
 ### Language-Specific Implementation Guides (Load During Phase 2)
-- [🐍 Python Implementation Guide](./reference/python_mcp_server.md) - Complete Python/FastMCP guide with:
+- [🐍 Python Implementation Guide](./references/python_mcp_server.md) - Complete Python/FastMCP guide with:
   - Server initialization patterns
   - Pydantic model examples
   - Tool registration with `@mcp.tool`
   - Complete working examples
   - Quality checklist
 
-- [⚡ TypeScript Implementation Guide](./reference/node_mcp_server.md) - Complete TypeScript guide with:
+- [⚡ TypeScript Implementation Guide](./references/node_mcp_server.md) - Complete TypeScript guide with:
   - Project structure
   - Zod schema patterns
   - Tool registration with `server.registerTool`
@@ -252,7 +308,7 @@ Load these resources as needed during development:
   - Quality checklist
 
 ### Evaluation Guide (Load During Phase 4)
-- [✅ Evaluation Guide](./reference/evaluation.md) - Complete evaluation creation guide with:
+- [✅ Evaluation Guide](./references/evaluation.md) - Complete evaluation creation guide with:
   - Question creation guidelines
   - Answer verification strategies
   - XML format specifications

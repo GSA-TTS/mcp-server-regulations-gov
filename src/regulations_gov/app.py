@@ -1,9 +1,10 @@
 import os
 
 from dotenv import load_dotenv
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 from regulations_gov.tools import register_tools
+from regulations_gov.routes import register_routes
 
 load_dotenv()
 
@@ -21,12 +22,11 @@ mcp = FastMCP(
     ),
 )
 
+# Register tools 
 register_tools(mcp)
 
-# ASGI app for HTTP deployments — imported by uvicorn in all remote environments:
-#   cloud.gov:  Procfile/manifest.yaml  →  uvicorn ... --port $PORT
-#   Databricks: app.yaml               →  uvicorn ... --port $DATABRICKS_APP_PORT
-# app = mcp.http_app(stateless_http=True)
+# Register routes 
+register_routes(mcp)
 
 
 if __name__ == "__main__":

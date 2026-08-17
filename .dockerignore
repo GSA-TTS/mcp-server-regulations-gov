@@ -1,0 +1,25 @@
+# Keep the build context minimal and ensure no secrets or local state are baked
+# into the image. The NHDPlus HR service is public, so no credentials are needed
+# at all; the eval-only vars in .env are never copied.
+
+.env
+*.env
+.env.*
+secrets/
+.databricks
+
+.venv/
+**/__pycache__/
+*.pyc
+
+.git/
+.gitignore
+.dockerignore
+
+docs/
+tests/
+scripts/
+eval/
+
+*.md
+!README.md
