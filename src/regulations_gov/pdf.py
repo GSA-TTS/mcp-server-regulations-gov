@@ -11,15 +11,21 @@ def _validate_download_url(url: str) -> str | None:
     """Return an error string if the URL is not an allowed attachment URL, else None."""
     try:
         parsed = urlparse(url)
-    except Exception:
-        return f"Error: Could not parse URL '{url}'."
+        hostname = parsed.hostname
+        port = parsed.port
+    except (TypeError, ValueError):
+        return "Error: Could not parse attachment URL."
     if parsed.scheme != "https":
         return f"Error: URL must use HTTPS (got '{parsed.scheme}')."
-    if parsed.hostname != ALLOWED_HOST:
+    if parsed.username is not None or parsed.password is not None:
+        return "Error: Attachment URL must not contain credentials."
+    if hostname != ALLOWED_HOST:
         return (
             f"Error: URL host must be '{ALLOWED_HOST}' "
-            f"(got '{parsed.hostname}'). Only regulations.gov attachment URLs are supported."
+            f"(got '{hostname}'). Only regulations.gov attachment URLs are supported."
         )
+    if port not in (None, 443):
+        return "Error: Attachment URL must use the default HTTPS port."
     return None
 
 
@@ -46,8 +52,10 @@ async def fetch_pdf_text(url: str) -> str:
         return err
 
     try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
+        async with httpx.AsyncClient(follow_redirects=False) as client:
             response = await client.get(url, timeout=60.0)
+            if response.is_redirect:
+                return "Error: Attachment redirects are not allowed."
             response.raise_for_status()
     except httpx.HTTPStatusError as e:
         return f"Error: Could not download file — HTTP {e.response.status_code}."
